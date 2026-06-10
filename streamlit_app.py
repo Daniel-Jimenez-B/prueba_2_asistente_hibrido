@@ -58,7 +58,7 @@ def cargar_archivo(archivo):
     if archivo.name.lower().endswith(".csv"):
         df = pd.read_csv(archivo)
     else:
-        df = pd.read_excel(archivo)
+        df = pd.read_excel(archivo, engine="openpyxl")
 
     df = df.copy()
     df.columns = [limpiar_nombre_columna(c) for c in df.columns]
