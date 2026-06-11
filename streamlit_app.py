@@ -70,6 +70,8 @@ st.markdown(
 ARCHIVO_ESPERADO = Path("data/1. SIFDE_Unificados_prueba.xlsx")
 CARPETA_DATOS = Path("data")
 
+NOTA_FONDOS = "**Nota:** Estos fondos no contemplan sobrantes de años anteriores."
+
 EXCLUIR_NO_ESCUELAS_EN_RANKINGS = True
 
 VALORES_NO_ESCUELA = [
@@ -134,11 +136,6 @@ def convertir_numero(serie):
 
 
 def formatear_dinero(valor):
-    """
-    Formato resumido:
-    1,200,000 -> $1.2 mill
-    45,000 -> $45.0 mil
-    """
     try:
         valor = float(valor)
 
@@ -173,6 +170,10 @@ def formatear_valor(valor, medida):
         return formatear_porcentaje(valor)
 
     return formatear_dinero(valor)
+
+
+def agregar_nota_fondos(texto):
+    return f"{texto}\n\n{NOTA_FONDOS}"
 
 
 # =========================================================
@@ -430,6 +431,62 @@ def buscar_valor_en_pregunta(pregunta, valores):
     return None
 
 
+def buscar_valores_mencionados(pregunta, valores):
+    p = limpiar_texto(pregunta)
+    encontrados = []
+
+    for valor in valores:
+        valor_limpio = limpiar_texto(valor)
+
+        if valor_limpio and valor_limpio in p:
+            encontrados.append(valor)
+
+    return list(dict.fromkeys(encontrados))
+
+
+def es_solicitud_comparacion(pregunta):
+    p = limpiar_texto(pregunta)
+
+    palabras = [
+        "compara",
+        "comparame",
+        "comparar",
+        "comparacion",
+        "vs",
+        "versus",
+        "contra",
+        "diferencia"
+    ]
+
+    return any(palabra in p for palabra in palabras)
+
+
+def detectar_dimension_por_valores(df, pregunta):
+    posibles_dimensiones = [
+        "region",
+        "escuela",
+        "tipo_de_fondo",
+        "agrupador",
+        "programa_project_final"
+    ]
+
+    mejor_dimension = None
+    mayor_coincidencias = 0
+
+    for dimension in posibles_dimensiones:
+        valores = obtener_valores_unicos(df, dimension)
+        encontrados = buscar_valores_mencionados(pregunta, valores)
+
+        if len(encontrados) > mayor_coincidencias:
+            mayor_coincidencias = len(encontrados)
+            mejor_dimension = dimension
+
+    if mayor_coincidencias > 0:
+        return mejor_dimension
+
+    return None
+
+
 def detectar_filtros(df, pregunta):
     filtros = {}
 
@@ -626,8 +683,11 @@ def responder_analitica(df, pregunta):
         )
 
     dimension = detectar_dimension(pregunta)
-    filtros = detectar_filtros(df, pregunta)
 
+    if dimension is None:
+        dimension = detectar_dimension_por_valores(df, pregunta)
+
+    filtros = detectar_filtros(df, pregunta)
     df_filtrado = aplicar_filtros(df, filtros)
 
     if df_filtrado.empty:
@@ -710,7 +770,15 @@ def construir_visualizacion(df, pregunta):
     dimension = detectar_dimension(pregunta)
 
     if dimension is None:
+        dimension = detectar_dimension_por_valores(df, pregunta)
+
+    if dimension is None:
         dimension = "tipo_de_fondo"
+
+    valores_dimension = buscar_valores_mencionados(
+        pregunta,
+        obtener_valores_unicos(df, dimension)
+    )
 
     filtros = detectar_filtros(df, pregunta)
 
@@ -727,9 +795,21 @@ def construir_visualizacion(df, pregunta):
         df_filtrado = datos_para_rankings_escuelas(df_filtrado)
 
     resumen = agrupar_por_dimension(df_filtrado, dimension)
+
+    # Si el usuario mencionó valores específicos, solo mostrar esos.
+    if len(valores_dimension) >= 1:
+        resumen = resumen[resumen[dimension].isin(valores_dimension)]
+
+    if resumen.empty:
+        return None, (
+            "No encontré datos para los elementos solicitados en la comparación. "
+            "Verifica que los nombres estén escritos como aparecen en el dashboard."
+        )
+
     resumen = resumen.sort_values(by=medida, ascending=False)
 
-    if dimension in ["escuela", "programa_project_final", "programa_tabla"]:
+    # Solo limitar a top 10 cuando no es comparación específica.
+    if not valores_dimension and dimension in ["escuela", "programa_project_final", "programa_tabla"]:
         resumen = resumen.head(10)
 
     tipo = "bar"
@@ -737,7 +817,10 @@ def construir_visualizacion(df, pregunta):
     if "torta" in p or "pastel" in p or "distribucion" in p:
         tipo = "pie"
 
-    titulo = f"{nombre_medida(medida).capitalize()} por {dimension}"
+    if valores_dimension or es_solicitud_comparacion(pregunta):
+        titulo = f"Comparación de {nombre_medida(medida)} por {dimension}"
+    else:
+        titulo = f"{nombre_medida(medida).capitalize()} por {dimension}"
 
     return {
         "tipo": tipo,
@@ -902,20 +985,22 @@ def mostrar_visualizacion(visualizacion):
 
         st.altair_chart(bars + etiquetas, use_container_width=True)
 
+    st.markdown(f"<p class='small-note'>{NOTA_FONDOS}</p>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
 def generar_respuesta(df, pregunta):
-    if es_solicitud_grafica(pregunta):
+    if es_solicitud_grafica(pregunta) or es_solicitud_comparacion(pregunta):
         visualizacion, error_visual = construir_visualizacion(df, pregunta)
 
         if error_visual:
             return error_visual, None
 
-        return (
-            f"Claro. Generé una tabla y una gráfica para **{visualizacion['titulo']}**.",
-            visualizacion
+        respuesta = (
+            f"Claro. Generé una tabla y una gráfica para **{visualizacion['titulo']}**."
         )
+
+        return agregar_nota_fondos(respuesta), visualizacion
 
     if es_solicitud_navegacion(pregunta):
         respuesta_nav = responder_navegacion(pregunta)
@@ -926,7 +1011,7 @@ def generar_respuesta(df, pregunta):
     respuesta_analitica = responder_analitica(df, pregunta)
 
     if respuesta_analitica:
-        return respuesta_analitica, None
+        return agregar_nota_fondos(respuesta_analitica), None
 
     respuesta_glosario = responder_glosario(pregunta)
 
@@ -959,11 +1044,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.info(
-    "Versión de prueba sin IA generativa. El asistente consulta automáticamente el archivo de datos "
-    "y no genera costo por consulta."
-)
-
 # Sidebar
 st.sidebar.success("Datos cargados automáticamente")
 st.sidebar.write(f"Archivo leído: `{ruta_datos}`")
@@ -992,9 +1072,6 @@ with st.sidebar.expander("Resumen general"):
     st.write("Ejecución total:")
     st.write(formatear_porcentaje(ejecucion_total))
 
-with st.expander("Ver datos normalizados que usa el asistente"):
-    st.dataframe(datos.head(100), use_container_width=True)
-
 st.markdown("### Preguntas sugeridas")
 
 preguntas_sugeridas = [
@@ -1003,6 +1080,8 @@ preguntas_sugeridas = [
     "¿Cuál es el balance total?",
     "¿Cuál es la escuela con mayor presupuesto?",
     "¿Cuál es la región con mayor presupuesto?",
+    "Compara ARECIBO vs BAYAMÓN por presupuesto",
+    "Compara SAN JUAN, PONCE y CAGUAS por ejecutado",
     "Muéstrame una gráfica de presupuesto por tipo de fondo",
     "Haz una gráfica de ejecutado por región",
     "Haz una distribución del presupuesto por agrupador",
@@ -1024,8 +1103,8 @@ if "historial" not in st.session_state:
             "contenido": (
                 "¡Hola! Soy el asistente del Dashboard Fondos. "
                 "Ya tengo cargados los datos del archivo. Puedes preguntarme por presupuesto, "
-                "ejecutado, balance, tipo de fondo, región, escuela, programa, agrupador "
-                "o pedirme una gráfica."
+                "ejecutado, balance, tipo de fondo, región, escuela, programa, agrupador, "
+                "comparaciones o pedirme una gráfica."
             )
         }
     ]
