@@ -11,12 +11,22 @@ from pathlib import Path
 # =========================================================
 
 st.set_page_config(
-    page_title="Asistente Híbrido del Dashboard Financiero",
+    page_title="Dashboard Fondos",
     page_icon="💬",
     layout="wide"
 )
 
-RUTA_EXCEL = Path("data/prueba_global.xlsx")
+ARCHIVO_ESPERADO = Path("data/1. SIFDE_Unificados_prueba.xlsx")
+CARPETA_DATOS = Path("data")
+
+EXCLUIR_NO_ESCUELAS_EN_RANKINGS = True
+
+VALORES_NO_ESCUELA = [
+    "NIVEL CENTRAL Y OTRAS ALOCACIONES",
+    "SIN ESCUELA",
+    "NO APLICA",
+    "N/A"
+]
 
 
 # =========================================================
@@ -39,10 +49,6 @@ def limpiar_nombre_columna(columna):
 
 
 def convertir_numero(serie):
-    """
-    Convierte columnas numéricas exportadas desde Power BI.
-    Maneja valores con $, comas, espacios y porcentajes.
-    """
     if pd.api.types.is_numeric_dtype(serie):
         return pd.to_numeric(serie, errors="coerce").fillna(0)
 
@@ -82,193 +88,194 @@ def formatear_valor(valor, medida):
 
 
 # =========================================================
-# CARGA AUTOMÁTICA DEL EXCEL
+# LOCALIZAR ARCHIVO
 # =========================================================
 
-@st.cache_data(show_spinner="Cargando datos del archivo Excel...")
-def cargar_datos_automatico(ruta_excel, fecha_modificacion):
-    ruta_excel = Path(ruta_excel)
+def resolver_ruta_archivo():
+    if ARCHIVO_ESPERADO.exists():
+        return ARCHIVO_ESPERADO
 
-    if not ruta_excel.exists():
-        st.error(
-            f"No se encontró el archivo en la ruta: {ruta_excel}. "
-            "Verifica que el archivo esté dentro de la carpeta data."
+    if CARPETA_DATOS.exists():
+        archivos = (
+            list(CARPETA_DATOS.glob("*.xlsx")) +
+            list(CARPETA_DATOS.glob("*.xls")) +
+            list(CARPETA_DATOS.glob("*.csv"))
         )
-        st.stop()
 
-    df = pd.read_excel(ruta_excel, engine="openpyxl")
+        if archivos:
+            return archivos[0]
 
-    df = df.copy()
-    df.columns = [limpiar_nombre_columna(c) for c in df.columns]
-
-    # Mapeo flexible de columnas exportadas desde Power BI
-    mapa_columnas = {
-        "tipo_de_fondo": "tipo_de_fondo",
-        "tipo_fondo": "tipo_de_fondo",
-        "fondo": "tipo_de_fondo",
-
-        "descripcion_programa_project_final": "programa",
-        "descripcion_programa_project_agrupado": "programa",
-        "descripcion_programa": "programa",
-        "programa": "programa",
-        "project": "programa",
-
-        "ejecutado": "presupuesto_ejecutado",
-        "presupuesto_ejecutado": "presupuesto_ejecutado",
-
-        "presupuesto": "presupuesto_asignado",
-        "presupuesto_asignado": "presupuesto_asignado",
-        "asignado": "presupuesto_asignado",
-
-        "escuelas_unificados": "escuela",
-        "escuela": "escuela",
-        "nombre_escuela": "escuela",
-        "school": "escuela",
-
-        "region": "region",
-        "region_consolidado": "region",
-        "region_educativa": "region",
-        "ore": "region",
-
-        "ingresos": "ingresos",
-        "ingreso": "ingresos",
-        "ingresos_totales": "ingresos"
-    }
-
-    df = df.rename(columns={c: mapa_columnas[c] for c in df.columns if c in mapa_columnas})
-
-    columnas_minimas = [
-        "tipo_de_fondo",
-        "programa",
-        "presupuesto_asignado",
-        "presupuesto_ejecutado",
-        "escuela"
-    ]
-
-    faltantes = [c for c in columnas_minimas if c not in df.columns]
-
-    if faltantes:
-        st.error("El archivo no tiene las columnas mínimas requeridas.")
-        st.write("Columnas faltantes:")
-        st.write(faltantes)
-        st.write("Columnas detectadas en el archivo:")
-        st.write(list(df.columns))
-        st.stop()
-
-    # Si no existe región, se crea para evitar errores.
-    # En este archivo de prueba no viene región.
-    if "region" not in df.columns:
-        df["region"] = "Sin región"
-
-    # Si no existe ingresos, no la inventamos. La dejamos como no disponible.
-    if "ingresos" not in df.columns:
-        df["ingresos"] = pd.NA
-
-    # Limpieza de texto
-    df["tipo_de_fondo"] = df["tipo_de_fondo"].astype(str).str.strip()
-    df["programa"] = df["programa"].astype(str).str.strip()
-    df["escuela"] = df["escuela"].astype(str).str.strip()
-    df["region"] = df["region"].astype(str).str.strip()
-
-    # Limpieza numérica
-    df["presupuesto_asignado"] = convertir_numero(df["presupuesto_asignado"])
-    df["presupuesto_ejecutado"] = convertir_numero(df["presupuesto_ejecutado"])
-
-    if df["ingresos"].isna().all():
-        df["ingresos_disponible"] = False
-        df["ingresos"] = 0
-    else:
-        df["ingresos_disponible"] = True
-        df["ingresos"] = convertir_numero(df["ingresos"])
-
-    # Métricas calculadas
-    df["balance"] = df["presupuesto_asignado"] - df["presupuesto_ejecutado"]
-
-    df["ejecucion_pct"] = df.apply(
-        lambda row: (
-            row["presupuesto_ejecutado"] / row["presupuesto_asignado"] * 100
-            if row["presupuesto_asignado"] != 0 else 0
-        ),
-        axis=1
+    st.error(
+        "No se encontró el archivo de datos. "
+        "Sube el archivo a la carpeta data con el nombre "
+        "`1. SIFDE_Unificados_prueba.xlsx`."
     )
-
-    # Eliminar filas totalmente vacías en escuela o programa
-    df = df[df["escuela"].notna()]
-    df = df[df["escuela"].astype(str).str.strip() != ""]
-    df = df[df["escuela"].astype(str).str.lower() != "nan"]
-
-    return df
+    st.stop()
 
 
 def obtener_fecha_modificacion(ruta):
+    ruta = Path(ruta)
     if ruta.exists():
         return ruta.stat().st_mtime
     return 0
 
 
 # =========================================================
-# CARGA DE DATOS
+# CARGA AUTOMÁTICA DEL ARCHIVO
 # =========================================================
 
-datos = cargar_datos_automatico(
-    str(RUTA_EXCEL),
-    obtener_fecha_modificacion(RUTA_EXCEL)
-)
+@st.cache_data(show_spinner="Cargando datos del dashboard de fondos...")
+def cargar_datos(ruta_archivo, fecha_modificacion):
+    ruta_archivo = Path(ruta_archivo)
 
+    if ruta_archivo.suffix.lower() == ".csv":
+        df = pd.read_csv(ruta_archivo)
+    else:
+        df = pd.read_excel(ruta_archivo, engine="openpyxl")
 
-# =========================================================
-# NAVEGACIÓN Y GLOSARIO
-# =========================================================
+    df = df.copy()
+    df.columns = [limpiar_nombre_columna(c) for c in df.columns]
 
-navegacion_dashboard = {
-    "distribucion del presupuesto": (
-        "La distribución del presupuesto se encuentra en la hoja **Resumen financiero**. "
-        "Dirígete a la parte superior izquierda del dashboard y selecciona esa hoja. "
-        "Allí encontrarás el gráfico de distribución del presupuesto."
-    ),
-    "escuelas": (
-        "La información por escuela se encuentra en la hoja **Escuelas**. "
-        "Allí puedes consultar presupuesto, ejecutado y balance por institución."
-    ),
-    "programas": (
-        "La información por programa se encuentra en la hoja **Programas** o en la sección "
-        "donde se agrupan los recursos por programa o proyecto."
-    ),
-    "fondos": (
-        "La información por tipo de fondo se encuentra en la hoja **Fondos**. "
-        "También puedes usar el filtro **Tipo de fondo** para seleccionar Estatal, Federal "
-        "u otro tipo disponible."
-    ),
-    "filtros": (
-        "Los filtros principales están en la parte superior del dashboard. "
-        "Desde allí puedes seleccionar año fiscal, tipo de fondo, programa, escuela "
-        "u otros filtros disponibles."
+    mapa_columnas = {
+        "tipo_de_fondo": "tipo_de_fondo",
+        "tipo_fondo": "tipo_de_fondo",
+        "fondo": "tipo_de_fondo",
+
+        "presupuesto": "presupuesto",
+        "presupuesto_asignado": "presupuesto",
+        "asignado": "presupuesto",
+
+        "ejecutado": "ejecutado",
+        "presupuesto_ejecutado": "ejecutado",
+
+        "tabla_programas_descripcion_programa": "programa_tabla",
+        "descripcion_programa_project_final": "programa_project_final",
+        "descripcion_programa_project_agrupado": "programa_project_agrupado",
+        "descripcion_programa": "programa",
+
+        "region_consolidado": "region",
+        "region": "region",
+        "ore": "region",
+
+        "escuelas_unificados": "escuela",
+        "escuela": "escuela",
+        "nombre_escuela": "escuela",
+
+        "agrupador": "agrupador"
+    }
+
+    df = df.rename(columns={c: mapa_columnas[c] for c in df.columns if c in mapa_columnas})
+
+    columnas_requeridas = [
+        "tipo_de_fondo",
+        "presupuesto",
+        "region",
+        "escuela",
+        "programa_project_final",
+        "agrupador",
+        "ejecutado"
+    ]
+
+    faltantes = [c for c in columnas_requeridas if c not in df.columns]
+
+    if faltantes:
+        st.error("El archivo no tiene las columnas mínimas requeridas.")
+        st.write("Columnas faltantes después de normalizar:")
+        st.write(faltantes)
+        st.write("Columnas detectadas:")
+        st.write(list(df.columns))
+        st.stop()
+
+    if "programa_tabla" not in df.columns:
+        df["programa_tabla"] = "Sin programa tabla"
+
+    # Limpieza texto
+    columnas_texto = [
+        "tipo_de_fondo",
+        "region",
+        "escuela",
+        "programa_project_final",
+        "programa_tabla",
+        "agrupador"
+    ]
+
+    for col in columnas_texto:
+        df[col] = df[col].fillna(f"Sin {col}").astype(str).str.strip()
+        df[col] = df[col].replace({"": f"Sin {col}", "nan": f"Sin {col}"})
+
+    # Limpieza numérica
+    df["presupuesto"] = convertir_numero(df["presupuesto"])
+    df["ejecutado"] = convertir_numero(df["ejecutado"])
+
+    # Métricas calculadas
+    df["balance"] = df["presupuesto"] - df["ejecutado"]
+
+    df["ejecucion_pct"] = df.apply(
+        lambda row: (
+            row["ejecutado"] / row["presupuesto"] * 100
+            if row["presupuesto"] != 0 else 0
+        ),
+        axis=1
     )
-}
 
-glosario = {
-    "presupuesto": (
-        "El presupuesto corresponde al monto asignado o autorizado para una escuela, "
-        "programa o tipo de fondo."
-    ),
-    "ejecutado": (
-        "El ejecutado representa los recursos ya utilizados o comprometidos según la información disponible."
-    ),
-    "balance": (
-        "El balance corresponde a la diferencia entre el presupuesto asignado y el presupuesto ejecutado."
-    ),
-    "tipo de fondo": (
-        "El tipo de fondo permite identificar el origen del recurso, por ejemplo estatal, federal o especial."
-    ),
-    "programa": (
-        "El programa o project permite clasificar los recursos según el destino presupuestario o funcional."
-    )
-}
+    return df
 
 
 # =========================================================
-# FUNCIONES DE DETECCIÓN
+# FUNCIONES ANALÍTICAS
 # =========================================================
+
+def nombre_medida(medida):
+    nombres = {
+        "presupuesto": "presupuesto",
+        "ejecutado": "ejecutado",
+        "balance": "balance",
+        "ejecucion_pct": "porcentaje de ejecución"
+    }
+    return nombres.get(medida, medida)
+
+
+def detectar_medida(pregunta):
+    p = limpiar_texto(pregunta)
+
+    if "ingreso" in p or "ingresos" in p:
+        return "ingresos_no_disponible"
+
+    if "porcentaje" in p or "% ejecucion" in p or "% de ejecucion" in p:
+        return "ejecucion_pct"
+
+    if "ejecutado" in p or "ejecucion" in p:
+        return "ejecutado"
+
+    if "balance" in p or "disponible" in p or "disponibilidad" in p:
+        return "balance"
+
+    if "presupuesto" in p or "asignado" in p:
+        return "presupuesto"
+
+    return "presupuesto"
+
+
+def detectar_dimension(pregunta):
+    p = limpiar_texto(pregunta)
+
+    if "region" in p or "regional" in p or "ore" in p:
+        return "region"
+
+    if "fondo" in p or "fondos" in p:
+        return "tipo_de_fondo"
+
+    if "agrupador" in p or "agrupacion" in p:
+        return "agrupador"
+
+    if "programa" in p or "project" in p or "proyecto" in p:
+        return "programa_project_final"
+
+    if "escuela" in p or "escuelas" in p or "institucion" in p:
+        return "escuela"
+
+    return None
+
 
 def obtener_valores_unicos(df, columna):
     valores = (
@@ -280,30 +287,27 @@ def obtener_valores_unicos(df, columna):
         .tolist()
     )
 
-    valores = [v for v in valores if v and v.lower() != "nan"]
-    return sorted(valores)
+    return sorted([v for v in valores if v and v.lower() != "nan"])
 
 
 def buscar_valor_en_pregunta(pregunta, valores):
-    pregunta_limpia = limpiar_texto(pregunta)
+    p = limpiar_texto(pregunta)
 
     valores_originales = valores
     valores_limpios = [limpiar_texto(v) for v in valores_originales]
 
-    # Coincidencia directa
     for original, limpio in zip(valores_originales, valores_limpios):
-        if limpio and limpio in pregunta_limpia:
+        if limpio and limpio in p:
             return original
 
-    # Coincidencia aproximada solo para textos relativamente largos
-    if len(pregunta_limpia) < 8:
+    if len(p) < 8:
         return None
 
     coincidencias = difflib.get_close_matches(
-        pregunta_limpia,
+        p,
         valores_limpios,
         n=1,
-        cutoff=0.72
+        cutoff=0.75
     )
 
     if coincidencias:
@@ -313,41 +317,150 @@ def buscar_valor_en_pregunta(pregunta, valores):
     return None
 
 
-def detectar_medida(pregunta):
-    p = limpiar_texto(pregunta)
+def detectar_filtros(df, pregunta):
+    filtros = {}
 
-    if "ingreso" in p or "ingresos" in p:
-        if datos["ingresos_disponible"].any():
-            return "ingresos"
-        return "ingresos_no_disponible"
-
-    if "ejecucion" in p and ("%" in p or "porcentaje" in p):
-        return "ejecucion_pct"
-
-    if "ejecutado" in p or "ejecucion" in p:
-        return "presupuesto_ejecutado"
-
-    if "balance" in p or "disponible" in p or "disponibilidad" in p:
-        return "balance"
-
-    if "presupuesto" in p or "asignado" in p:
-        return "presupuesto_asignado"
-
-    return "presupuesto_asignado"
-
-
-def nombre_medida(medida):
-    nombres = {
-        "presupuesto_asignado": "presupuesto asignado",
-        "presupuesto_ejecutado": "presupuesto ejecutado",
-        "balance": "balance",
-        "ejecucion_pct": "porcentaje de ejecución",
-        "ingresos": "ingresos",
-        "ingresos_no_disponible": "ingresos"
+    columnas_busqueda = {
+        "tipo_de_fondo": obtener_valores_unicos(df, "tipo_de_fondo"),
+        "region": obtener_valores_unicos(df, "region"),
+        "escuela": obtener_valores_unicos(df, "escuela"),
+        "programa_project_final": obtener_valores_unicos(df, "programa_project_final"),
+        "programa_tabla": obtener_valores_unicos(df, "programa_tabla"),
+        "agrupador": obtener_valores_unicos(df, "agrupador")
     }
 
-    return nombres.get(medida, medida)
+    for columna, valores in columnas_busqueda.items():
+        valor = buscar_valor_en_pregunta(pregunta, valores)
+        if valor:
+            filtros[columna] = valor
 
+    return filtros
+
+
+def aplicar_filtros(df, filtros):
+    df_filtrado = df.copy()
+
+    for columna, valor in filtros.items():
+        df_filtrado = df_filtrado[df_filtrado[columna] == valor]
+
+    return df_filtrado
+
+
+def datos_para_rankings_escuelas(df):
+    if not EXCLUIR_NO_ESCUELAS_EN_RANKINGS:
+        return df
+
+    no_escuelas_limpias = [limpiar_texto(x) for x in VALORES_NO_ESCUELA]
+
+    return df[
+        ~df["escuela"].apply(lambda x: limpiar_texto(x) in no_escuelas_limpias)
+    ]
+
+
+def agrupar_por_dimension(df, dimension):
+    resumen = (
+        df.groupby(dimension, as_index=False)
+        .agg(
+            presupuesto=("presupuesto", "sum"),
+            ejecutado=("ejecutado", "sum"),
+            balance=("balance", "sum")
+        )
+    )
+
+    resumen["ejecucion_pct"] = resumen.apply(
+        lambda row: (
+            row["ejecutado"] / row["presupuesto"] * 100
+            if row["presupuesto"] != 0 else 0
+        ),
+        axis=1
+    )
+
+    return resumen
+
+
+# =========================================================
+# NAVEGACIÓN Y GLOSARIO
+# =========================================================
+
+navegacion_dashboard = {
+    "distribucion del presupuesto": (
+        "La distribución del presupuesto la puedes encontrar en la hoja o sección de "
+        "**Resumen** del dashboard. Allí se muestra cómo se distribuye el presupuesto "
+        "por fondo, región, programa o categoría, según los filtros aplicados."
+    ),
+    "fondos": (
+        "La información de fondos se consulta en la sección **Fondos** del dashboard. "
+        "También puedes usar el filtro **Tipo de fondo** para revisar fondos estatales, "
+        "estatales especiales o federales."
+    ),
+    "escuelas": (
+        "La información por escuela se encuentra en la sección **Escuelas**. "
+        "Allí puedes revisar presupuesto, ejecutado y balance por institución."
+    ),
+    "regiones": (
+        "La información por región se encuentra en la sección **Regiones**. "
+        "Usa el filtro de región para revisar ARECIBO, BAYAMÓN, CAGUAS, HUMACAO, "
+        "MAYAGÜEZ, PONCE, SAN JUAN u otras categorías disponibles."
+    ),
+    "programas": (
+        "La información por programa se encuentra en la sección **Programas** o "
+        "en la visual donde se agrupan los recursos por descripción de programa o project."
+    ),
+    "filtros": (
+        "Los filtros principales suelen ubicarse en la parte superior del dashboard. "
+        "Desde allí puedes seleccionar tipo de fondo, región, escuela, programa o agrupador."
+    )
+}
+
+
+glosario = {
+    "presupuesto": (
+        "El presupuesto corresponde al monto asignado o autorizado para un fondo, "
+        "región, escuela, programa o agrupador."
+    ),
+    "ejecutado": (
+        "El ejecutado representa los recursos que ya fueron utilizados, comprometidos "
+        "o registrados como ejecución dentro de la información disponible."
+    ),
+    "balance": (
+        "El balance es la diferencia entre el presupuesto y el ejecutado. "
+        "En términos simples, muestra cuánto presupuesto queda disponible según la información cargada."
+    ),
+    "tipo de fondo": (
+        "El tipo de fondo permite identificar el origen o clasificación del recurso, "
+        "por ejemplo estatal, estatal especial o federal."
+    ),
+    "agrupador": (
+        "El agrupador clasifica la información en categorías generales como escuelas públicas, "
+        "otros gastos, adulto y post-secundario, escuelas privadas o pensiones."
+    )
+}
+
+
+def responder_navegacion(pregunta):
+    p = limpiar_texto(pregunta)
+
+    for tema, respuesta in navegacion_dashboard.items():
+        palabras = limpiar_texto(tema).split()
+        if any(palabra in p for palabra in palabras):
+            return respuesta
+
+    return None
+
+
+def responder_glosario(pregunta):
+    p = limpiar_texto(pregunta)
+
+    for termino, definicion in glosario.items():
+        if limpiar_texto(termino) in p:
+            return definicion
+
+    return None
+
+
+# =========================================================
+# RESPUESTAS
+# =========================================================
 
 def es_solicitud_grafica(pregunta):
     p = limpiar_texto(pregunta)
@@ -364,7 +477,8 @@ def es_solicitud_grafica(pregunta):
         "mostrar",
         "distribucion",
         "top",
-        "ranking"
+        "ranking",
+        "tabla"
     ]
 
     return any(palabra in p for palabra in palabras)
@@ -387,36 +501,6 @@ def es_solicitud_navegacion(pregunta):
     return any(palabra in p for palabra in palabras)
 
 
-# =========================================================
-# RESPUESTAS DE NAVEGACIÓN Y GLOSARIO
-# =========================================================
-
-def responder_navegacion(pregunta):
-    p = limpiar_texto(pregunta)
-
-    for tema, respuesta in navegacion_dashboard.items():
-        palabras = limpiar_texto(tema).split()
-
-        if any(palabra in p for palabra in palabras):
-            return respuesta
-
-    return None
-
-
-def responder_glosario(pregunta):
-    p = limpiar_texto(pregunta)
-
-    for termino, definicion in glosario.items():
-        if limpiar_texto(termino) in p:
-            return definicion
-
-    return None
-
-
-# =========================================================
-# RESPUESTAS ANALÍTICAS
-# =========================================================
-
 def responder_analitica(df, pregunta):
     p = limpiar_texto(pregunta)
     medida = detectar_medida(pregunta)
@@ -425,125 +509,83 @@ def responder_analitica(df, pregunta):
         return (
             "El archivo cargado no contiene una columna de **ingresos**. "
             "Con la estructura actual puedo responder sobre presupuesto, ejecutado, balance, "
-            "escuelas, programas y tipo de fondo."
+            "tipo de fondo, región, escuela, programa y agrupador."
         )
 
-    escuelas = obtener_valores_unicos(df, "escuela")
-    programas = obtener_valores_unicos(df, "programa")
-    fondos = obtener_valores_unicos(df, "tipo_de_fondo")
-    regiones = obtener_valores_unicos(df, "region")
+    dimension = detectar_dimension(pregunta)
+    filtros = detectar_filtros(df, pregunta)
 
-    escuela = buscar_valor_en_pregunta(pregunta, escuelas)
-    programa = buscar_valor_en_pregunta(pregunta, programas)
-    fondo = buscar_valor_en_pregunta(pregunta, fondos)
+    df_filtrado = aplicar_filtros(df, filtros)
 
-    region = None
-    if not (len(regiones) == 1 and regiones[0] == "Sin región"):
-        region = buscar_valor_en_pregunta(pregunta, regiones)
-
-    # Si preguntan por región y el archivo no tiene región real
-    if "region" in p and region is None and "Sin región" in regiones:
+    if df_filtrado.empty:
         return (
-            "El archivo cargado no contiene una columna de **región**. "
-            "Por ahora puedo responder por escuela, programa y tipo de fondo."
+            "No encontré datos con los filtros detectados en tu pregunta. "
+            "Intenta escribir el nombre de la escuela, región, fondo o programa tal como aparece en el dashboard."
         )
 
-    # Escuela con mayor medida
-    if "mayor" in p and "escuela" in p:
-        resumen = (
-            df.groupby("escuela", as_index=False)[medida]
-            .sum()
-            .sort_values(by=medida, ascending=False)
-        )
+    if "mayor" in p or "mas alto" in p or "mayores" in p:
+        if dimension is None:
+            dimension = "escuela"
+
+        df_ranking = df_filtrado
+
+        if dimension == "escuela":
+            df_ranking = datos_para_rankings_escuelas(df_ranking)
+
+        resumen = agrupar_por_dimension(df_ranking, dimension)
+        resumen = resumen.sort_values(by=medida, ascending=False)
+
+        if resumen.empty:
+            return "No encontré datos suficientes para calcular el ranking solicitado."
 
         fila = resumen.iloc[0]
 
         return (
-            f"La escuela con mayor {nombre_medida(medida)} es **{fila['escuela']}**, "
-            f"con **{formatear_valor(fila[medida], medida)}**."
+            f"El mayor {nombre_medida(medida)} por **{dimension}** corresponde a "
+            f"**{fila[dimension]}**, con **{formatear_valor(fila[medida], medida)}**."
         )
 
-    # Programa con mayor medida
-    if "mayor" in p and "programa" in p:
-        resumen = (
-            df.groupby("programa", as_index=False)[medida]
-            .sum()
-            .sort_values(by=medida, ascending=False)
-        )
+    if "menor" in p or "mas bajo" in p:
+        if dimension is None:
+            dimension = "escuela"
+
+        df_ranking = df_filtrado
+
+        if dimension == "escuela":
+            df_ranking = datos_para_rankings_escuelas(df_ranking)
+
+        resumen = agrupar_por_dimension(df_ranking, dimension)
+        resumen = resumen.sort_values(by=medida, ascending=True)
+
+        if resumen.empty:
+            return "No encontré datos suficientes para calcular el ranking solicitado."
 
         fila = resumen.iloc[0]
 
         return (
-            f"El programa con mayor {nombre_medida(medida)} es **{fila['programa']}**, "
-            f"con **{formatear_valor(fila[medida], medida)}**."
+            f"El menor {nombre_medida(medida)} por **{dimension}** corresponde a "
+            f"**{fila[dimension]}**, con **{formatear_valor(fila[medida], medida)}**."
         )
 
-    # Tipo de fondo con mayor medida
-    if "mayor" in p and "fondo" in p:
-        resumen = (
-            df.groupby("tipo_de_fondo", as_index=False)[medida]
-            .sum()
-            .sort_values(by=medida, ascending=False)
-        )
+    # Si hay filtro específico, responder total filtrado
+    if filtros:
+        total = df_filtrado[medida].sum()
 
-        fila = resumen.iloc[0]
+        detalle_filtros = ", ".join([f"{k}: {v}" for k, v in filtros.items()])
 
         return (
-            f"El tipo de fondo con mayor {nombre_medida(medida)} es **{fila['tipo_de_fondo']}**, "
-            f"con **{formatear_valor(fila[medida], medida)}**."
-        )
-
-    # Consulta por escuela específica
-    if escuela:
-        total = df[df["escuela"] == escuela][medida].sum()
-
-        return (
-            f"Para la escuela **{escuela}**, el total de {nombre_medida(medida)} "
-            f"es **{formatear_valor(total, medida)}**."
-        )
-
-    # Consulta por programa específico
-    if programa:
-        total = df[df["programa"] == programa][medida].sum()
-
-        return (
-            f"Para el programa **{programa}**, el total de {nombre_medida(medida)} "
-            f"es **{formatear_valor(total, medida)}**."
-        )
-
-    # Consulta por tipo de fondo específico
-    if fondo:
-        total = df[df["tipo_de_fondo"] == fondo][medida].sum()
-
-        return (
-            f"Para el tipo de fondo **{fondo}**, el total de {nombre_medida(medida)} "
-            f"es **{formatear_valor(total, medida)}**."
-        )
-
-    # Consulta por región específica
-    if region:
-        total = df[df["region"] == region][medida].sum()
-
-        return (
-            f"Para la región **{region}**, el total de {nombre_medida(medida)} "
+            f"Para **{detalle_filtros}**, el total de {nombre_medida(medida)} "
             f"es **{formatear_valor(total, medida)}**."
         )
 
     # Total general
-    if "total" in p or "cuanto" in p or "cual es" in p:
-        total = df[medida].sum()
+    total = df_filtrado[medida].sum()
 
-        return (
-            f"El total general de {nombre_medida(medida)} en el archivo cargado es "
-            f"**{formatear_valor(total, medida)}**."
-        )
+    return (
+        f"El total general de {nombre_medida(medida)} es "
+        f"**{formatear_valor(total, medida)}**."
+    )
 
-    return None
-
-
-# =========================================================
-# VISUALIZACIONES
-# =========================================================
 
 def construir_visualizacion(df, pregunta):
     p = limpiar_texto(pregunta)
@@ -552,59 +594,49 @@ def construir_visualizacion(df, pregunta):
     if medida == "ingresos_no_disponible":
         return None, (
             "El archivo cargado no contiene una columna de **ingresos**, "
-            "por lo tanto no puedo generar una gráfica de ingresos con esta estructura."
+            "por lo tanto no puedo generar una gráfica de ingresos."
         )
+
+    dimension = detectar_dimension(pregunta)
+
+    if dimension is None:
+        dimension = "tipo_de_fondo"
+
+    filtros = detectar_filtros(df, pregunta)
+
+    # No aplicar como filtro la misma dimensión que se quiere graficar
+    filtros_para_visual = {
+        k: v for k, v in filtros.items() if k != dimension
+    }
+
+    df_filtrado = aplicar_filtros(df, filtros_para_visual)
+
+    if df_filtrado.empty:
+        return None, "No encontré datos suficientes para generar la visualización."
+
+    if dimension == "escuela":
+        df_filtrado = datos_para_rankings_escuelas(df_filtrado)
+
+    resumen = agrupar_por_dimension(df_filtrado, dimension)
+    resumen = resumen.sort_values(by=medida, ascending=False)
+
+    if dimension in ["escuela", "programa_project_final", "programa_tabla"]:
+        resumen = resumen.head(10)
 
     tipo = "bar"
 
     if "torta" in p or "pastel" in p or "distribucion" in p:
         tipo = "pie"
 
-    # Definir dimensión
-    if "programa" in p or "project" in p:
-        categoria = "programa"
-        titulo = f"Top 10 programas por {nombre_medida(medida)}"
-        limite = 10
+    titulo = f"{nombre_medida(medida).capitalize()} por {dimension}"
 
-    elif "fondo" in p or "fondos" in p:
-        categoria = "tipo_de_fondo"
-        titulo = f"{nombre_medida(medida).capitalize()} por tipo de fondo"
-        limite = None
-
-    elif "region" in p:
-        if df["region"].nunique() == 1 and df["region"].iloc[0] == "Sin región":
-            return None, (
-                "El archivo cargado no contiene una columna de **región**, "
-                "por lo tanto no puedo generar una gráfica por región."
-            )
-
-        categoria = "region"
-        titulo = f"{nombre_medida(medida).capitalize()} por región"
-        limite = None
-
-    else:
-        categoria = "escuela"
-        titulo = f"Top 10 escuelas por {nombre_medida(medida)}"
-        limite = 10
-
-    resumen = (
-        df.groupby(categoria, as_index=False)[medida]
-        .sum()
-        .sort_values(by=medida, ascending=False)
-    )
-
-    if limite:
-        resumen = resumen.head(limite)
-
-    visualizacion = {
+    return {
         "tipo": tipo,
         "titulo": titulo,
-        "categoria": categoria,
-        "valor": medida,
+        "dimension": dimension,
+        "medida": medida,
         "datos": resumen.to_dict(orient="records")
-    }
-
-    return visualizacion, None
+    }, None
 
 
 def mostrar_visualizacion(visualizacion):
@@ -612,61 +644,48 @@ def mostrar_visualizacion(visualizacion):
 
     tipo = visualizacion["tipo"]
     titulo = visualizacion["titulo"]
-    categoria = visualizacion["categoria"]
-    valor = visualizacion["valor"]
+    dimension = visualizacion["dimension"]
+    medida = visualizacion["medida"]
 
     st.subheader(titulo)
 
-    tabla = df_viz.copy()
-    tabla["valor_formateado"] = tabla[valor].apply(lambda x: formatear_valor(x, valor))
+    tabla = df_viz[[dimension, medida]].copy()
+    tabla["Valor"] = tabla[medida].apply(lambda x: formatear_valor(x, medida))
+    tabla = tabla[[dimension, "Valor"]].rename(columns={dimension: "Categoría"})
 
-    st.dataframe(
-        tabla[[categoria, "valor_formateado"]].rename(
-            columns={
-                categoria: "Categoría",
-                "valor_formateado": "Valor"
-            }
-        ),
-        use_container_width=True,
-        hide_index=True
-    )
+    st.dataframe(tabla, use_container_width=True, hide_index=True)
 
     if tipo == "pie":
         chart = (
             alt.Chart(df_viz)
             .mark_arc()
             .encode(
-                theta=alt.Theta(f"{valor}:Q"),
-                color=alt.Color(f"{categoria}:N", title="Categoría"),
+                theta=alt.Theta(f"{medida}:Q"),
+                color=alt.Color(f"{dimension}:N", title="Categoría"),
                 tooltip=[
-                    alt.Tooltip(f"{categoria}:N", title="Categoría"),
-                    alt.Tooltip(f"{valor}:Q", title="Valor", format=",.0f")
+                    alt.Tooltip(f"{dimension}:N", title="Categoría"),
+                    alt.Tooltip(f"{medida}:Q", title="Valor", format=",.0f")
                 ]
             )
-            .properties(height=400)
+            .properties(height=420)
         )
-
     else:
         chart = (
             alt.Chart(df_viz)
             .mark_bar()
             .encode(
-                x=alt.X(f"{valor}:Q", title="Valor"),
-                y=alt.Y(f"{categoria}:N", sort="-x", title=""),
+                x=alt.X(f"{medida}:Q", title="Valor"),
+                y=alt.Y(f"{dimension}:N", sort="-x", title=""),
                 tooltip=[
-                    alt.Tooltip(f"{categoria}:N", title="Categoría"),
-                    alt.Tooltip(f"{valor}:Q", title="Valor", format=",.0f")
+                    alt.Tooltip(f"{dimension}:N", title="Categoría"),
+                    alt.Tooltip(f"{medida}:Q", title="Valor", format=",.0f")
                 ]
             )
-            .properties(height=450)
+            .properties(height=460)
         )
 
     st.altair_chart(chart, use_container_width=True)
 
-
-# =========================================================
-# RESPUESTA GENERAL
-# =========================================================
 
 def generar_respuesta(df, pregunta):
     if es_solicitud_grafica(pregunta):
@@ -698,40 +717,58 @@ def generar_respuesta(df, pregunta):
 
     return (
         "Por ahora no encontré una respuesta exacta. Puedes preguntarme por presupuesto, "
-        "ejecutado, balance, escuela, programa, tipo de fondo o pedirme una gráfica.",
+        "ejecutado, balance, tipo de fondo, región, escuela, programa, agrupador "
+        "o pedirme una gráfica.",
         None
     )
 
 
 # =========================================================
-# INTERFAZ STREAMLIT
+# INTERFAZ
 # =========================================================
 
-st.title("💬 Asistente Híbrido del Dashboard Financiero")
+ruta_datos = resolver_ruta_archivo()
+
+datos = cargar_datos(
+    str(ruta_datos),
+    obtener_fecha_modificacion(ruta_datos)
+)
+
+st.title("Dashboard Fondos")
 
 st.write(
-    "Este asistente lee automáticamente un archivo Excel exportado desde Power BI "
-    "y permite consultar información presupuestaria de forma guiada."
+    "Este asistente te dará las respuestas que necesitas sobre el dashboard de fondos "
+    "del Departamento de Educación de Puerto Rico."
 )
 
 st.info(
-    "Versión de prueba sin IA generativa. No usa API Key y no genera costo por consulta."
+    "Versión de prueba sin IA generativa. El asistente consulta automáticamente el archivo de datos "
+    "y no genera costo por consulta."
 )
 
-st.sidebar.success("Datos cargados automáticamente.")
-st.sidebar.write(f"Archivo leído: `{RUTA_EXCEL}`")
+# Sidebar
+st.sidebar.success("Datos cargados automáticamente")
+st.sidebar.write(f"Archivo leído: `{ruta_datos}`")
 st.sidebar.write(f"Filas cargadas: `{len(datos):,}`")
 st.sidebar.write(f"Columnas cargadas: `{len(datos.columns):,}`")
 
-with st.sidebar.expander("Resumen de datos"):
+with st.sidebar.expander("Resumen general"):
     st.write("Presupuesto total:")
-    st.write(formatear_dinero(datos["presupuesto_asignado"].sum()))
+    st.write(formatear_dinero(datos["presupuesto"].sum()))
 
     st.write("Ejecutado total:")
-    st.write(formatear_dinero(datos["presupuesto_ejecutado"].sum()))
+    st.write(formatear_dinero(datos["ejecutado"].sum()))
 
     st.write("Balance total:")
     st.write(formatear_dinero(datos["balance"].sum()))
+
+    ejecucion_total = (
+        datos["ejecutado"].sum() / datos["presupuesto"].sum() * 100
+        if datos["presupuesto"].sum() != 0 else 0
+    )
+
+    st.write("Ejecución total:")
+    st.write(formatear_porcentaje(ejecucion_total))
 
 with st.expander("Ver datos normalizados que usa el asistente"):
     st.dataframe(datos.head(100), use_container_width=True)
@@ -740,13 +777,15 @@ st.markdown("### Preguntas sugeridas")
 
 preguntas_sugeridas = [
     "¿Cuál es el presupuesto total?",
+    "¿Cuál es el ejecutado total?",
+    "¿Cuál es el balance total?",
     "¿Cuál es la escuela con mayor presupuesto?",
-    "Haz una gráfica de presupuesto por escuela",
-    "Haz una gráfica de ejecutado por programa",
-    "Muéstrame presupuesto por tipo de fondo",
-    "Haz una distribución del presupuesto por tipo de fondo",
-    "¿Dónde encuentro la distribución del presupuesto?",
-    "¿Qué significa ejecutado?"
+    "¿Cuál es la región con mayor presupuesto?",
+    "Muéstrame una gráfica de presupuesto por tipo de fondo",
+    "Haz una gráfica de ejecutado por región",
+    "Haz una distribución del presupuesto por agrupador",
+    "Muéstrame una gráfica de presupuesto por programa",
+    "¿Dónde encuentro la distribución del presupuesto?"
 ]
 
 cols = st.columns(2)
@@ -761,9 +800,9 @@ if "historial" not in st.session_state:
         {
             "rol": "assistant",
             "contenido": (
-                "¡Hola! Soy el asistente híbrido del dashboard financiero. "
-                "Ya tengo cargados los datos del archivo Excel. Puedes preguntarme por "
-                "presupuesto, ejecutado, balance, escuelas, programas, tipo de fondo "
+                "¡Hola! Soy el asistente del Dashboard Fondos. "
+                "Ya tengo cargados los datos del archivo. Puedes preguntarme por presupuesto, "
+                "ejecutado, balance, tipo de fondo, región, escuela, programa, agrupador "
                 "o pedirme una gráfica."
             )
         }
