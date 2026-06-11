@@ -61,6 +61,7 @@ st.markdown(
     .small-note {
         font-size: 13px;
         color: #64748b;
+        margin-top: 12px;
     }
     </style>
     """,
@@ -95,7 +96,6 @@ COLORES = [
     "#14B8A6",
     "#7C3AED"
 ]
-
 
 # =========================================================
 # FUNCIONES DE LIMPIEZA Y FORMATO
@@ -176,6 +176,19 @@ def agregar_nota_fondos(texto):
     return f"{texto}\n\n{NOTA_FONDOS}"
 
 
+def etiqueta_dimension(dimension):
+    etiquetas = {
+        "tipo_de_fondo": "Tipo de fondo",
+        "region": "Región",
+        "escuela": "Escuela",
+        "programa_project_final": "Programa",
+        "programa_tabla": "Programa",
+        "componente": "Componente"
+    }
+
+    return etiquetas.get(dimension, dimension)
+
+
 # =========================================================
 # LOCALIZAR ARCHIVO
 # =========================================================
@@ -224,7 +237,7 @@ def cargar_datos(ruta_archivo, fecha_modificacion):
 
     df = df.copy()
 
-    # Corrección por si el archivo queda como una sola columna separada por delimitadores
+    # Corrección si el archivo queda como una sola columna separada por delimitadores
     if df.shape[1] == 1:
         nombre_columna_original = str(df.columns[0])
         muestra_filas = "\n".join(df.iloc[:20, 0].astype(str).tolist())
@@ -265,7 +278,7 @@ def cargar_datos(ruta_archivo, fecha_modificacion):
         "tabla_programas_descripcion_programa": "programa_tabla",
         "descripcion_programa_project_final": "programa_project_final",
         "descripcion_programa_project_agrupado": "programa_project_agrupado",
-        "descripcion_programa": "programa",
+        "descripcion_programa": "programa_project_final",
 
         "region_consolidado": "region",
         "region": "region",
@@ -275,7 +288,8 @@ def cargar_datos(ruta_archivo, fecha_modificacion):
         "escuela": "escuela",
         "nombre_escuela": "escuela",
 
-        "agrupador": "agrupador"
+        "agrupador": "componente",
+        "componente": "componente"
     }
 
     df = df.rename(columns={c: mapa_columnas[c] for c in df.columns if c in mapa_columnas})
@@ -286,7 +300,7 @@ def cargar_datos(ruta_archivo, fecha_modificacion):
         "region",
         "escuela",
         "programa_project_final",
-        "agrupador",
+        "componente",
         "ejecutado"
     ]
 
@@ -309,7 +323,7 @@ def cargar_datos(ruta_archivo, fecha_modificacion):
         "escuela",
         "programa_project_final",
         "programa_tabla",
-        "agrupador"
+        "componente"
     ]
 
     for col in columnas_texto:
@@ -373,11 +387,11 @@ def detectar_dimension(pregunta):
     if "region" in p or "regional" in p or "ore" in p:
         return "region"
 
-    if "fondo" in p or "fondos" in p:
+    if "tipo de fondo" in p or "tipo_de_fondo" in p or "fondo" in p or "fondos" in p:
         return "tipo_de_fondo"
 
-    if "agrupador" in p or "agrupacion" in p:
-        return "agrupador"
+    if "componente" in p or "agrupador" in p or "agrupacion" in p:
+        return "componente"
 
     if "programa" in p or "project" in p or "proyecto" in p:
         return "programa_project_final"
@@ -466,7 +480,7 @@ def detectar_dimension_por_valores(df, pregunta):
         "region",
         "escuela",
         "tipo_de_fondo",
-        "agrupador",
+        "componente",
         "programa_project_final"
     ]
 
@@ -496,7 +510,7 @@ def detectar_filtros(df, pregunta):
         "escuela": obtener_valores_unicos(df, "escuela"),
         "programa_project_final": obtener_valores_unicos(df, "programa_project_final"),
         "programa_tabla": obtener_valores_unicos(df, "programa_tabla"),
-        "agrupador": obtener_valores_unicos(df, "agrupador")
+        "componente": obtener_valores_unicos(df, "componente")
     }
 
     for columna, valores in columnas_busqueda.items():
@@ -556,7 +570,7 @@ navegacion_dashboard = {
     "distribucion del presupuesto": (
         "La distribución del presupuesto la puedes encontrar en la hoja o sección de "
         "**Resumen** del dashboard. Allí se muestra cómo se distribuye el presupuesto "
-        "por fondo, región, programa o categoría, según los filtros aplicados."
+        "por fondo, región, programa o componente, según los filtros aplicados."
     ),
     "fondos": (
         "La información de fondos se consulta en la sección **Fondos** del dashboard. "
@@ -576,9 +590,13 @@ navegacion_dashboard = {
         "La información por programa se encuentra en la sección **Programas** o "
         "en la visual donde se agrupan los recursos por descripción de programa o project."
     ),
+    "componentes": (
+        "La información por componente se encuentra en la sección donde se agrupan "
+        "los fondos por categorías generales del dashboard."
+    ),
     "filtros": (
         "Los filtros principales suelen ubicarse en la parte superior del dashboard. "
-        "Desde allí puedes seleccionar tipo de fondo, región, escuela, programa o agrupador."
+        "Desde allí puedes seleccionar tipo de fondo, región, escuela, programa o componente."
     )
 }
 
@@ -586,7 +604,7 @@ navegacion_dashboard = {
 glosario = {
     "presupuesto": (
         "El presupuesto corresponde al monto asignado o autorizado para un fondo, "
-        "región, escuela, programa o agrupador."
+        "región, escuela, programa o componente."
     ),
     "ejecutado": (
         "El ejecutado representa los recursos que ya fueron utilizados, comprometidos "
@@ -600,9 +618,12 @@ glosario = {
         "El tipo de fondo permite identificar el origen o clasificación del recurso, "
         "por ejemplo estatal, estatal especial o federal."
     ),
-    "agrupador": (
-        "El agrupador clasifica la información en categorías generales como escuelas públicas, "
+    "componente": (
+        "El componente clasifica la información en categorías generales como escuelas públicas, "
         "otros gastos, adulto y post-secundario, escuelas privadas o pensiones."
+    ),
+    "agrupador": (
+        "En este asistente, el agrupador se presenta como **componente**."
     )
 }
 
@@ -679,7 +700,7 @@ def responder_analitica(df, pregunta):
         return (
             "El archivo cargado no contiene una columna de **ingresos**. "
             "Con la estructura actual puedo responder sobre presupuesto, ejecutado, balance, "
-            "tipo de fondo, región, escuela, programa y agrupador."
+            "tipo de fondo, región, escuela, programa y componente."
         )
 
     dimension = detectar_dimension(pregunta)
@@ -693,7 +714,8 @@ def responder_analitica(df, pregunta):
     if df_filtrado.empty:
         return (
             "No encontré datos con los filtros detectados en tu pregunta. "
-            "Intenta escribir el nombre de la escuela, región, fondo o programa tal como aparece en el dashboard."
+            "Intenta escribir el nombre de la escuela, región, fondo, programa o componente "
+            "tal como aparece en el dashboard."
         )
 
     if "mayor" in p or "mas alto" in p or "mayores" in p:
@@ -714,7 +736,7 @@ def responder_analitica(df, pregunta):
         fila = resumen.iloc[0]
 
         return (
-            f"El mayor {nombre_medida(medida)} por **{dimension}** corresponde a "
+            f"El mayor {nombre_medida(medida)} por **{etiqueta_dimension(dimension)}** corresponde a "
             f"**{fila[dimension]}**, con **{formatear_valor(fila[medida], medida)}**."
         )
 
@@ -736,13 +758,15 @@ def responder_analitica(df, pregunta):
         fila = resumen.iloc[0]
 
         return (
-            f"El menor {nombre_medida(medida)} por **{dimension}** corresponde a "
+            f"El menor {nombre_medida(medida)} por **{etiqueta_dimension(dimension)}** corresponde a "
             f"**{fila[dimension]}**, con **{formatear_valor(fila[medida], medida)}**."
         )
 
     if filtros:
         total = df_filtrado[medida].sum()
-        detalle_filtros = ", ".join([f"{k}: {v}" for k, v in filtros.items()])
+        detalle_filtros = ", ".join(
+            [f"{etiqueta_dimension(k)}: {v}" for k, v in filtros.items()]
+        )
 
         return (
             f"Para **{detalle_filtros}**, el total de {nombre_medida(medida)} "
@@ -782,6 +806,9 @@ def construir_visualizacion(df, pregunta):
 
     filtros = detectar_filtros(df, pregunta)
 
+    # Punto clave:
+    # Si piden "gráfica de tipo de fondo para la región PONCE",
+    # la dimensión es tipo_de_fondo y la región se conserva como filtro.
     filtros_para_visual = {
         k: v for k, v in filtros.items() if k != dimension
     }
@@ -796,13 +823,14 @@ def construir_visualizacion(df, pregunta):
 
     resumen = agrupar_por_dimension(df_filtrado, dimension)
 
-    # Si el usuario mencionó valores específicos, solo mostrar esos.
+    # Si el usuario mencionó valores específicos de la dimensión, solo muestra esos.
+    # Ejemplo: "compara PONCE vs SAN JUAN" solo muestra PONCE y SAN JUAN.
     if len(valores_dimension) >= 1:
         resumen = resumen[resumen[dimension].isin(valores_dimension)]
 
     if resumen.empty:
         return None, (
-            "No encontré datos para los elementos solicitados en la comparación. "
+            "No encontré datos para los elementos solicitados. "
             "Verifica que los nombres estén escritos como aparecen en el dashboard."
         )
 
@@ -818,9 +846,9 @@ def construir_visualizacion(df, pregunta):
         tipo = "pie"
 
     if valores_dimension or es_solicitud_comparacion(pregunta):
-        titulo = f"Comparación de {nombre_medida(medida)} por {dimension}"
+        titulo = f"Comparación de {nombre_medida(medida)} por {etiqueta_dimension(dimension)}"
     else:
-        titulo = f"{nombre_medida(medida).capitalize()} por {dimension}"
+        titulo = f"{nombre_medida(medida).capitalize()} por {etiqueta_dimension(dimension)}"
 
     return {
         "tipo": tipo,
@@ -881,14 +909,25 @@ def mostrar_visualizacion(visualizacion):
             value=formatear_valor(mayor[medida], medida)
         )
 
+    # Tabla con total final
     tabla = df_viz[[dimension, "valor_formateado", "participacion_txt"]].copy()
     tabla = tabla.rename(
         columns={
-            dimension: "Categoría",
+            dimension: etiqueta_dimension(dimension),
             "valor_formateado": "Valor",
             "participacion_txt": "Participación"
         }
     )
+
+    fila_total = pd.DataFrame([
+        {
+            etiqueta_dimension(dimension): "TOTAL",
+            "Valor": formatear_valor(total, medida),
+            "Participación": "100.0%"
+        }
+    ])
+
+    tabla = pd.concat([tabla, fila_total], ignore_index=True)
 
     st.markdown("#### Tabla resumen")
     st.dataframe(
@@ -904,11 +943,11 @@ def mostrar_visualizacion(visualizacion):
             theta=alt.Theta(f"{medida}:Q", stack=True),
             color=alt.Color(
                 f"{dimension}:N",
-                title="Categoría",
+                title=etiqueta_dimension(dimension),
                 scale=alt.Scale(range=COLORES)
             ),
             tooltip=[
-                alt.Tooltip(f"{dimension}:N", title="Categoría"),
+                alt.Tooltip(f"{dimension}:N", title=etiqueta_dimension(dimension)),
                 alt.Tooltip("valor_completo:N", title="Valor"),
                 alt.Tooltip("participacion_txt:N", title="Participación")
             ]
@@ -958,7 +997,7 @@ def mostrar_visualizacion(visualizacion):
                     scale=alt.Scale(range=COLORES)
                 ),
                 tooltip=[
-                    alt.Tooltip(f"{dimension}:N", title="Categoría"),
+                    alt.Tooltip(f"{dimension}:N", title=etiqueta_dimension(dimension)),
                     alt.Tooltip("valor_completo:N", title="Valor"),
                     alt.Tooltip("participacion_txt:N", title="Participación")
                 ]
@@ -1000,7 +1039,7 @@ def generar_respuesta(df, pregunta):
             f"Claro. Generé una tabla y una gráfica para **{visualizacion['titulo']}**."
         )
 
-        return agregar_nota_fondos(respuesta), visualizacion
+        return respuesta, visualizacion
 
     if es_solicitud_navegacion(pregunta):
         respuesta_nav = responder_navegacion(pregunta)
@@ -1020,7 +1059,7 @@ def generar_respuesta(df, pregunta):
 
     return (
         "Por ahora no encontré una respuesta exacta. Puedes preguntarme por presupuesto, "
-        "ejecutado, balance, tipo de fondo, región, escuela, programa, agrupador "
+        "ejecutado, balance, tipo de fondo, región, escuela, programa, componente "
         "o pedirme una gráfica.",
         None
     )
@@ -1080,12 +1119,12 @@ preguntas_sugeridas = [
     "¿Cuál es el balance total?",
     "¿Cuál es la escuela con mayor presupuesto?",
     "¿Cuál es la región con mayor presupuesto?",
+    "Muéstrame una gráfica de tipo de fondo para la región PONCE",
+    "Haz una gráfica de ejecutado por región",
+    "Haz una distribución del presupuesto por componente",
+    "Muéstrame una gráfica de presupuesto por programa",
     "Compara ARECIBO vs BAYAMÓN por presupuesto",
     "Compara SAN JUAN, PONCE y CAGUAS por ejecutado",
-    "Muéstrame una gráfica de presupuesto por tipo de fondo",
-    "Haz una gráfica de ejecutado por región",
-    "Haz una distribución del presupuesto por agrupador",
-    "Muéstrame una gráfica de presupuesto por programa",
     "¿Dónde encuentro la distribución del presupuesto?"
 ]
 
@@ -1103,7 +1142,7 @@ if "historial" not in st.session_state:
             "contenido": (
                 "¡Hola! Soy el asistente del Dashboard Fondos. "
                 "Ya tengo cargados los datos del archivo. Puedes preguntarme por presupuesto, "
-                "ejecutado, balance, tipo de fondo, región, escuela, programa, agrupador, "
+                "ejecutado, balance, tipo de fondo, región, escuela, programa, componente, "
                 "comparaciones o pedirme una gráfica."
             )
         }
