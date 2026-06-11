@@ -5,6 +5,7 @@ import unicodedata
 import re
 import difflib
 from pathlib import Path
+from io import StringIO
 
 # =========================================================
 # CONFIGURACIÓN GENERAL
@@ -14,6 +15,56 @@ st.set_page_config(
     page_title="Dashboard Fondos",
     page_icon="💬",
     layout="wide"
+)
+
+st.markdown(
+    """
+    <style>
+    .main {
+        background-color: #f7f9fc;
+    }
+
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+
+    div[data-testid="stMetric"] {
+        background-color: white;
+        border: 1px solid #e6eaf0;
+        padding: 16px;
+        border-radius: 14px;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+    }
+
+    div[data-testid="stDataFrame"] {
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid #e6eaf0;
+    }
+
+    .dashboard-card {
+        background-color: white;
+        padding: 18px;
+        border-radius: 16px;
+        border: 1px solid #e6eaf0;
+        box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+        margin-bottom: 18px;
+    }
+
+    .subtitle {
+        font-size: 18px;
+        color: #475569;
+        margin-bottom: 18px;
+    }
+
+    .small-note {
+        font-size: 13px;
+        color: #64748b;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
 ARCHIVO_ESPERADO = Path("data/1. SIFDE_Unificados_prueba.xlsx")
@@ -28,9 +79,24 @@ VALORES_NO_ESCUELA = [
     "N/A"
 ]
 
+COLORES = [
+    "#0B3D91",
+    "#2563EB",
+    "#06B6D4",
+    "#10B981",
+    "#84CC16",
+    "#F59E0B",
+    "#F97316",
+    "#EF4444",
+    "#A855F7",
+    "#64748B",
+    "#14B8A6",
+    "#7C3AED"
+]
+
 
 # =========================================================
-# FUNCIONES DE LIMPIEZA
+# FUNCIONES DE LIMPIEZA Y FORMATO
 # =========================================================
 
 def limpiar_texto(texto):
@@ -68,15 +134,36 @@ def convertir_numero(serie):
 
 
 def formatear_dinero(valor):
+    """
+    Formato resumido:
+    1,200,000 -> $1.2 mill
+    45,000 -> $45.0 mil
+    """
     try:
+        valor = float(valor)
+
+        if abs(valor) >= 1_000_000:
+            return f"${valor / 1_000_000:,.1f} mill"
+
+        if abs(valor) >= 1_000:
+            return f"${valor / 1_000:,.1f} mil"
+
         return f"${valor:,.0f}"
+
+    except Exception:
+        return "$0"
+
+
+def formatear_dinero_completo(valor):
+    try:
+        return f"${float(valor):,.0f}"
     except Exception:
         return "$0"
 
 
 def formatear_porcentaje(valor):
     try:
-        return f"{valor:,.1f}%"
+        return f"{float(valor):,.1f}%"
     except Exception:
         return "0.0%"
 
@@ -84,6 +171,7 @@ def formatear_porcentaje(valor):
 def formatear_valor(valor, medida):
     if medida == "ejecucion_pct":
         return formatear_porcentaje(valor)
+
     return formatear_dinero(valor)
 
 
@@ -107,7 +195,7 @@ def resolver_ruta_archivo():
 
     st.error(
         "No se encontró el archivo de datos. "
-        "Sube el archivo a la carpeta data con el nombre "
+        "Sube el archivo a la carpeta `data` con el nombre "
         "`1. SIFDE_Unificados_prueba.xlsx`."
     )
     st.stop()
@@ -121,7 +209,7 @@ def obtener_fecha_modificacion(ruta):
 
 
 # =========================================================
-# CARGA AUTOMÁTICA DEL ARCHIVO
+# CARGA AUTOMÁTICA DE DATOS
 # =========================================================
 
 @st.cache_data(show_spinner="Cargando datos del dashboard de fondos...")
@@ -129,11 +217,36 @@ def cargar_datos(ruta_archivo, fecha_modificacion):
     ruta_archivo = Path(ruta_archivo)
 
     if ruta_archivo.suffix.lower() == ".csv":
-        df = pd.read_csv(ruta_archivo)
+        df = pd.read_csv(ruta_archivo, sep=None, engine="python")
     else:
         df = pd.read_excel(ruta_archivo, engine="openpyxl")
 
     df = df.copy()
+
+    # Corrección por si el archivo queda como una sola columna separada por delimitadores
+    if df.shape[1] == 1:
+        nombre_columna_original = str(df.columns[0])
+        muestra_filas = "\n".join(df.iloc[:20, 0].astype(str).tolist())
+        muestra_total = nombre_columna_original + "\n" + muestra_filas
+
+        posibles_separadores = [",", ";", "\t", "|"]
+        separador_detectado = max(
+            posibles_separadores,
+            key=lambda sep: muestra_total.count(sep)
+        )
+
+        if muestra_total.count(separador_detectado) > 3:
+            contenido = "\n".join(
+                [nombre_columna_original] +
+                df.iloc[:, 0].astype(str).tolist()
+            )
+
+            df = pd.read_csv(
+                StringIO(contenido),
+                sep=separador_detectado,
+                engine="python"
+            )
+
     df.columns = [limpiar_nombre_columna(c) for c in df.columns]
 
     mapa_columnas = {
@@ -189,7 +302,6 @@ def cargar_datos(ruta_archivo, fecha_modificacion):
     if "programa_tabla" not in df.columns:
         df["programa_tabla"] = "Sin programa tabla"
 
-    # Limpieza texto
     columnas_texto = [
         "tipo_de_fondo",
         "region",
@@ -203,11 +315,9 @@ def cargar_datos(ruta_archivo, fecha_modificacion):
         df[col] = df[col].fillna(f"Sin {col}").astype(str).str.strip()
         df[col] = df[col].replace({"": f"Sin {col}", "nan": f"Sin {col}"})
 
-    # Limpieza numérica
     df["presupuesto"] = convertir_numero(df["presupuesto"])
     df["ejecutado"] = convertir_numero(df["ejecutado"])
 
-    # Métricas calculadas
     df["balance"] = df["presupuesto"] - df["ejecutado"]
 
     df["ejecucion_pct"] = df.apply(
@@ -301,6 +411,9 @@ def buscar_valor_en_pregunta(pregunta, valores):
             return original
 
     if len(p) < 8:
+        return None
+
+    if len(valores_limpios) > 5000:
         return None
 
     coincidencias = difflib.get_close_matches(
@@ -459,7 +572,7 @@ def responder_glosario(pregunta):
 
 
 # =========================================================
-# RESPUESTAS
+# RESPUESTAS Y VISUALIZACIONES
 # =========================================================
 
 def es_solicitud_grafica(pregunta):
@@ -567,10 +680,8 @@ def responder_analitica(df, pregunta):
             f"**{fila[dimension]}**, con **{formatear_valor(fila[medida], medida)}**."
         )
 
-    # Si hay filtro específico, responder total filtrado
     if filtros:
         total = df_filtrado[medida].sum()
-
         detalle_filtros = ", ".join([f"{k}: {v}" for k, v in filtros.items()])
 
         return (
@@ -578,7 +689,6 @@ def responder_analitica(df, pregunta):
             f"es **{formatear_valor(total, medida)}**."
         )
 
-    # Total general
     total = df_filtrado[medida].sum()
 
     return (
@@ -604,7 +714,6 @@ def construir_visualizacion(df, pregunta):
 
     filtros = detectar_filtros(df, pregunta)
 
-    # No aplicar como filtro la misma dimensión que se quiere graficar
     filtros_para_visual = {
         k: v for k, v in filtros.items() if k != dimension
     }
@@ -647,44 +756,153 @@ def mostrar_visualizacion(visualizacion):
     dimension = visualizacion["dimension"]
     medida = visualizacion["medida"]
 
+    if df_viz.empty:
+        st.warning("No encontré datos para mostrar.")
+        return
+
+    df_viz = df_viz.sort_values(by=medida, ascending=False).copy()
+
+    total = df_viz[medida].sum()
+    df_viz["valor_formateado"] = df_viz[medida].apply(lambda x: formatear_valor(x, medida))
+    df_viz["valor_completo"] = df_viz[medida].apply(formatear_dinero_completo)
+
+    if total != 0:
+        df_viz["participacion"] = df_viz[medida] / total * 100
+    else:
+        df_viz["participacion"] = 0
+
+    df_viz["participacion_txt"] = df_viz["participacion"].apply(lambda x: f"{x:,.1f}%")
+
+    st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+
     st.subheader(titulo)
 
-    tabla = df_viz[[dimension, medida]].copy()
-    tabla["Valor"] = tabla[medida].apply(lambda x: formatear_valor(x, medida))
-    tabla = tabla[[dimension, "Valor"]].rename(columns={dimension: "Categoría"})
+    col1, col2, col3 = st.columns(3)
 
-    st.dataframe(tabla, use_container_width=True, hide_index=True)
+    with col1:
+        st.metric(
+            label=f"Total {nombre_medida(medida)}",
+            value=formatear_valor(total, medida)
+        )
+
+    with col2:
+        st.metric(
+            label="Categorías",
+            value=f"{len(df_viz):,}"
+        )
+
+    with col3:
+        mayor = df_viz.iloc[0]
+        st.metric(
+            label="Mayor valor",
+            value=formatear_valor(mayor[medida], medida)
+        )
+
+    tabla = df_viz[[dimension, "valor_formateado", "participacion_txt"]].copy()
+    tabla = tabla.rename(
+        columns={
+            dimension: "Categoría",
+            "valor_formateado": "Valor",
+            "participacion_txt": "Participación"
+        }
+    )
+
+    st.markdown("#### Tabla resumen")
+    st.dataframe(
+        tabla,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.markdown("#### Visualización")
 
     if tipo == "pie":
-        chart = (
-            alt.Chart(df_viz)
-            .mark_arc()
-            .encode(
-                theta=alt.Theta(f"{medida}:Q"),
-                color=alt.Color(f"{dimension}:N", title="Categoría"),
-                tooltip=[
-                    alt.Tooltip(f"{dimension}:N", title="Categoría"),
-                    alt.Tooltip(f"{medida}:Q", title="Valor", format=",.0f")
-                ]
-            )
-            .properties(height=420)
-        )
-    else:
-        chart = (
-            alt.Chart(df_viz)
-            .mark_bar()
-            .encode(
-                x=alt.X(f"{medida}:Q", title="Valor"),
-                y=alt.Y(f"{dimension}:N", sort="-x", title=""),
-                tooltip=[
-                    alt.Tooltip(f"{dimension}:N", title="Categoría"),
-                    alt.Tooltip(f"{medida}:Q", title="Valor", format=",.0f")
-                ]
-            )
-            .properties(height=460)
+        base = alt.Chart(df_viz).encode(
+            theta=alt.Theta(f"{medida}:Q", stack=True),
+            color=alt.Color(
+                f"{dimension}:N",
+                title="Categoría",
+                scale=alt.Scale(range=COLORES)
+            ),
+            tooltip=[
+                alt.Tooltip(f"{dimension}:N", title="Categoría"),
+                alt.Tooltip("valor_completo:N", title="Valor"),
+                alt.Tooltip("participacion_txt:N", title="Participación")
+            ]
         )
 
-    st.altair_chart(chart, use_container_width=True)
+        chart = (
+            base.mark_arc(innerRadius=70, outerRadius=150)
+            .properties(height=430)
+        )
+
+        text = (
+            base.mark_text(radius=185, size=12, fontWeight="bold")
+            .encode(
+                text=alt.Text("participacion_txt:N")
+            )
+        )
+
+        st.altair_chart(chart + text, use_container_width=True)
+
+    else:
+        if medida == "ejecucion_pct":
+            axis_expr = "format(datum.value, ',.1f') + '%'"
+        else:
+            axis_expr = "'$' + format(datum.value / 1000000, ',.1f') + ' mill'"
+
+        bars = (
+            alt.Chart(df_viz)
+            .mark_bar(
+                cornerRadiusTopRight=6,
+                cornerRadiusBottomRight=6
+            )
+            .encode(
+                x=alt.X(
+                    f"{medida}:Q",
+                    title=nombre_medida(medida).capitalize(),
+                    axis=alt.Axis(labelExpr=axis_expr)
+                ),
+                y=alt.Y(
+                    f"{dimension}:N",
+                    sort="-x",
+                    title="",
+                    axis=alt.Axis(labelLimit=280)
+                ),
+                color=alt.Color(
+                    f"{dimension}:N",
+                    legend=None,
+                    scale=alt.Scale(range=COLORES)
+                ),
+                tooltip=[
+                    alt.Tooltip(f"{dimension}:N", title="Categoría"),
+                    alt.Tooltip("valor_completo:N", title="Valor"),
+                    alt.Tooltip("participacion_txt:N", title="Participación")
+                ]
+            )
+            .properties(height=max(380, min(720, len(df_viz) * 46)))
+        )
+
+        etiquetas = (
+            alt.Chart(df_viz)
+            .mark_text(
+                align="left",
+                baseline="middle",
+                dx=6,
+                fontSize=12,
+                fontWeight="bold",
+                color="#111827"
+            )
+            .encode(
+                x=alt.X(f"{medida}:Q"),
+                y=alt.Y(f"{dimension}:N", sort="-x"),
+                text=alt.Text("valor_formateado:N")
+            )
+        )
+
+        st.altair_chart(bars + etiquetas, use_container_width=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def generar_respuesta(df, pregunta):
@@ -736,9 +954,9 @@ datos = cargar_datos(
 
 st.title("Dashboard Fondos")
 
-st.write(
-    "Este asistente te dará las respuestas que necesitas sobre el dashboard de fondos "
-    "del Departamento de Educación de Puerto Rico."
+st.markdown(
+    '<p class="subtitle">Este asistente te dará las respuestas que necesitas sobre el dashboard de fondos del Departamento de Educación de Puerto Rico.</p>',
+    unsafe_allow_html=True
 )
 
 st.info(
@@ -753,19 +971,23 @@ st.sidebar.write(f"Filas cargadas: `{len(datos):,}`")
 st.sidebar.write(f"Columnas cargadas: `{len(datos.columns):,}`")
 
 with st.sidebar.expander("Resumen general"):
-    st.write("Presupuesto total:")
-    st.write(formatear_dinero(datos["presupuesto"].sum()))
-
-    st.write("Ejecutado total:")
-    st.write(formatear_dinero(datos["ejecutado"].sum()))
-
-    st.write("Balance total:")
-    st.write(formatear_dinero(datos["balance"].sum()))
+    presupuesto_total = datos["presupuesto"].sum()
+    ejecutado_total = datos["ejecutado"].sum()
+    balance_total = datos["balance"].sum()
 
     ejecucion_total = (
-        datos["ejecutado"].sum() / datos["presupuesto"].sum() * 100
-        if datos["presupuesto"].sum() != 0 else 0
+        ejecutado_total / presupuesto_total * 100
+        if presupuesto_total != 0 else 0
     )
+
+    st.write("Presupuesto total:")
+    st.write(formatear_dinero(presupuesto_total))
+
+    st.write("Ejecutado total:")
+    st.write(formatear_dinero(ejecutado_total))
+
+    st.write("Balance total:")
+    st.write(formatear_dinero(balance_total))
 
     st.write("Ejecución total:")
     st.write(formatear_porcentaje(ejecucion_total))
